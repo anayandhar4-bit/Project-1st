@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snake Game</title>
+
+<style>
+body {
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+  font-family:Arial;
+  background: radial-gradient(circle at center,#1a1a2e,#0f172a,#020617);
+  color:#fff;
+}
+
+#controls{ margin-bottom:10px; }
+#score{ margin-bottom:5px; font-size:18px; }
+#highScore{ margin-bottom:5px; font-size:16px; color:#aaa; }
+#power{ margin-bottom:10px; font-size:14px; }
+
+#stats{
+  position:absolute;
+  left:20px;
+  top:20px;
+  font-size:16px;
+  color:#ccc;
+}
+
+canvas{
+  background: linear-gradient(#111 1px, transparent 1px),
+              linear-gradient(90deg,#111 1px, transparent 1px),
+              #000;
+  background-size:20px 20px;
+  border:2px solid #fff;
+  box-shadow:0 0 20px rgba(0,255,150,0.2);
+}
+</style>
+</head>
+
+<body>
+
+<div id="stats">
+  <div>Deaths: <span id="deaths">0</span></div>
+  <div>Best Time: <span id="bestTime">0s</span></div>
+</div>
+
+<div id="controls">
+  Difficulty:
+  <select id="difficulty">
+    <option value="6">Easy</option>
+    <option value="4" selected>Normal</option>
+    <option value="2">Hard</option>
+  </select>
+
+  Mode:
+  <select id="mode">
+    <option value="normal">Normal</option>
+    <option value="enemy">Smart Enemy</option>
+  </select>
+
+  Enemy AI:
+  <select id="enemyLevel">
+    <option value="easy">Easy</option>
+    <option value="normal" selected>Normal</option>
+    <option value="hard">Hard</option>
+  </select>
+
+  Food Mode:
+  <select id="foodMode">
+    <option value="single">Single</option>
+    <option value="multi">Multiple</option>
+  </select>
+</div>
+
+<div id="score">Score: 0</div>
+<div id="highScore">High Score: 0</div>
+<div id="power">Power: READY</div>
+
+<canvas id="game" width="400" height="400"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const scoreEl = document.getElementById('score');
+const highScoreEl = document.getElementById('highScore');
+const powerEl = document.getElementById('power');
+
+const difficultyEl = document.getElementById('difficulty');
+const modeEl = document.getElementById('mode');
+const enemyLevelEl = document.getElementById('enemyLevel');
+const foodModeEl = document.getElementById('foodMode');
+
+const deathsEl = document.getElementById('deaths');
+const bestTimeEl = document.getElementById('bestTime');
+
+const grid = 20;
+let count = 0;
+let speed = parseInt(difficultyEl.value);
+let score = 0;
+
+let gameOver = false;
+
+// stats
+let deaths = localStorage.getItem('snakeDeaths') || 0;
+let bestTime = localStorage.getItem('snakeBestTime') || 0;
+let startTime = Date.now();
+let finalTime = 0;
+
+deathsEl.textContent = deaths;
+bestTimeEl.textContent = bestTime + 's';
+
+// enemy speed
+let enemyMoveCounter = 0;
+
+// power
+let powerActive = false;
+let powerDuration = 120;
+let powerTimer = 0;
+let powerCooldown = 300;
+let cooldownTimer = 0;
+
+let highScore = localStorage.getItem('snakeHighScore') || 0;
+highScoreEl.textContent = 'High Score: ' + highScore;
+
+let snake = { x:160,y:160,dx:grid,dy:0,cells:[],maxCells:4 };
+let enemy = { x:40,y:40,dx:grid,dy:0,cells:[],maxCells:4 };
+
+let direction='right';
+let enemyDir='right';
+
+let apples = [{x:320,y:320}];
+
+function spawnApples(){
+  apples = [];
+  let count = foodModeEl.value==='multi' ? 3 : 1;
+  for(let i=0;i<count;i++){
+    apples.push({
+      x: Math.floor(Math.random()*20)*grid,
+      y: Math.floor(Math.random()*20)*grid
+    });
+  }
+}
+
+function getRandomInt(min,max){
+  return Math.floor(Math.random()*(max-min))+min;
+}
+
+// FIXED TIMER
+function getSurvivalTime(){
+  if(gameOver) return finalTime;
+  return Math.floor((Date.now() - startTime)/1000);
+}
+
+function drawTriangle(x,y,dir,color='lime'){
+  ctx.fillStyle=color;
+  ctx.beginPath();
+
+  if(dir==='right'){ ctx.moveTo(x,y); ctx.lineTo(x,y+grid); ctx.lineTo(x+grid,y+grid/2); }
+  if(dir==='left'){ ctx.moveTo(x+grid,y); ctx.lineTo(x+grid,y+grid); ctx.lineTo(x,y+grid/2); }
+  if(dir==='up'){ ctx.moveTo(x,y+grid); ctx.lineTo(x+grid,y+grid); ctx.lineTo(x+grid/2,y); }
+  if(dir==='down'){ ctx.moveTo(x,y); ctx.lineTo(x+grid,y); ctx.lineTo(x+grid/2,y+grid); }
+
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle='white';
+  let cx=x+grid/2, cy=y+grid/2, off=4;
+  ctx.beginPath();
+  ctx.arc(cx+off,cy-off,2,0,Math.PI*2);
+  ctx.arc(cx+off,cy+off,2,0,Math.PI*2);
+  ctx.fill();
+}
+
+function moveSnake(s){
+  s.x+=s.dx;
+  s.y+=s.dy;
+
+  if(s.x<0) s.x=canvas.width-grid;
+  if(s.x>=canvas.width) s.x=0;
+  if(s.y<0) s.y=canvas.height-grid;
+  if(s.y>=canvas.height) s.y=0;
+
+  s.cells.unshift({x:s.x,y:s.y});
+  if(s.cells.length>s.maxCells) s.cells.pop();
+}
+
+function enemyAI(){
+  if(modeEl.value!=='enemy') return;
+
+  let level = enemyLevelEl.value;
+  let predict = level==='easy'?1:level==='normal'?3:6;
+  let randomness = level==='easy'?0.5:level==='normal'?0.25:0.05;
+
+  let targetX = snake.x + snake.dx * predict;
+  let targetY = snake.y + snake.dy * predict;
+
+  let dx = targetX - enemy.x;
+  let dy = targetY - enemy.y;
+
+  if(Math.random()<randomness){
+    let dirs=[
+      {dx:grid,dy:0,dir:'right'},
+      {dx:-grid,dy:0,dir:'left'},
+      {dx:0,dy:grid,dir:'down'},
+      {dx:0,dy:-grid,dir:'up'}
+    ];
+    let r=dirs[Math.floor(Math.random()*dirs.length)];
+    enemy.dx=r.dx; enemy.dy=r.dy; enemyDir=r.dir;
+    return;
+  }
+
+  if(Math.abs(dx)>Math.abs(dy)){
+    enemy.dx=dx>0?grid:-grid;
+    enemy.dy=0;
+    enemyDir=dx>0?'right':'left';
+  } else {
+    enemy.dy=dy>0?grid:-grid;
+    enemy.dx=0;
+    enemyDir=dy>0?'down':'up';
+  }
+}
+
+function updateHighScore(){
+  if(score>highScore){
+    highScore=score;
+    localStorage.setItem('snakeHighScore',highScore);
+    highScoreEl.textContent='High Score: '+highScore;
+  }
+}
+
+function triggerGameOver(){
+  gameOver=true;
+
+  finalTime = Math.floor((Date.now() - startTime)/1000);
+
+  deaths++;
+  localStorage.setItem('snakeDeaths',deaths);
+  deathsEl.textContent=deaths;
+
+  if(finalTime > bestTime){
+    bestTime=finalTime;
+    localStorage.setItem('snakeBestTime',bestTime);
+    bestTimeEl.textContent=bestTime+'s';
+  }
+
+  updateHighScore();
+}
+
+function resetGame(){
+  snake={ x:160,y:160,dx:grid,dy:0,cells:[],maxCells:4 };
+  enemy={ x:40,y:40,dx:grid,dy:0,cells:[],maxCells:4 };
+  direction='right';
+  enemyDir='right';
+  score=0;
+  scoreEl.textContent='Score: 0';
+  powerActive=false;
+  powerTimer=0;
+  cooldownTimer=0;
+  gameOver=false;
+  startTime=Date.now();
+  finalTime=0;
+  spawnApples();
+}
+
+function drawGameOver(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  ctx.fillStyle='white';
+  ctx.textAlign='center';
+
+  ctx.font='28px Arial';
+  ctx.fillText('GAME OVER',canvas.width/2,160);
+
+  ctx.font='18px Arial';
+  ctx.fillText('Score: '+score,canvas.width/2,200);
+  ctx.fillText('Time: '+finalTime+'s',canvas.width/2,220);
+  ctx.fillText('Press SPACE to restart',canvas.width/2,250);
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+
+  if(gameOver){
+    drawGameOver();
+    return;
+  }
+
+  if(++count<speed) return;
+  count=0;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  moveSnake(snake);
+  enemyAI();
+
+  let level=enemyLevelEl.value;
+
+  if(level==='easy'){
+    enemyMoveCounter++;
+    if(enemyMoveCounter%2===0) moveSnake(enemy);
+  }
+  else if(level==='normal'){
+    moveSnake(enemy);
+  }
+  else if(level==='hard'){
+    moveSnake(enemy);
+    if(Math.random()<0.4) moveSnake(enemy);
+  }
+
+  ctx.fillStyle='red';
+  apples.forEach(a=> ctx.fillRect(a.x,a.y,grid-1,grid-1));
+
+  snake.cells.forEach((c,i)=>{
+    if(i===0){
+      drawTriangle(c.x,c.y,direction,'lime');
+    } else {
+      ctx.beginPath();
+      ctx.arc(c.x+grid/2,c.y+grid/2,grid/2-1,0,Math.PI*2);
+      ctx.fillStyle='lime';
+      ctx.fill();
+    }
+
+    apples.forEach((a,index)=>{
+      if(c.x===a.x && c.y===a.y){
+        snake.maxCells++;
+        score++;
+        scoreEl.textContent='Score: '+score;
+        apples[index]={ x:getRandomInt(0,20)*grid, y:getRandomInt(0,20)*grid };
+      }
+    });
+  });
+
+  if(modeEl.value==='enemy'){
+    enemy.cells.forEach((c,i)=>{
+      if(i===0){
+        drawTriangle(c.x,c.y,enemyDir,'orange');
+
+        let dist=Math.abs(snake.x-enemy.x)+Math.abs(snake.y-enemy.y);
+        if(dist<120){ ctx.shadowColor='red'; ctx.shadowBlur=15; }
+
+        ctx.fillStyle='red';
+        ctx.beginPath();
+        ctx.arc(c.x+10,c.y+6,3,0,Math.PI*2);
+        ctx.arc(c.x+10,c.y+14,3,0,Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur=0;
+      } else {
+        ctx.beginPath();
+        ctx.arc(c.x+grid/2,c.y+grid/2,grid/2-1,0,Math.PI*2);
+        ctx.fillStyle='orange';
+        ctx.fill();
+      }
+
+      if(c.x===snake.x && c.y===snake.y){
+        triggerGameOver();
+      }
+    });
+  }
+
+  // live timer
+  ctx.fillStyle='#aaa';
+  ctx.font='12px Arial';
+  ctx.fillText('Time: '+getSurvivalTime()+'s',10,390);
+}
+
+document.addEventListener('keydown',e=>{
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+
+  if(gameOver && e.key===' '){ resetGame(); return; }
+
+  if(e.key==='ArrowLeft'&&direction!=='right'){ snake.dx=-grid; snake.dy=0; direction='left'; }
+  if(e.key==='ArrowRight'&&direction!=='left'){ snake.dx=grid; snake.dy=0; direction='right'; }
+  if(e.key==='ArrowUp'&&direction!=='down'){ snake.dy=-grid; snake.dx=0; direction='up'; }
+  if(e.key==='ArrowDown'&&direction!=='up'){ snake.dy=grid; snake.dx=0; direction='down'; }
+});
+
+difficultyEl.addEventListener('change',()=> speed=parseInt(difficultyEl.value));
+foodModeEl.addEventListener('change',spawnApples);
+
+spawnApples();
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
